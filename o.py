@@ -3,13 +3,22 @@ import random
 import re
 import uuid
 import httpx
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 # === CONFIGURATION ===
-TELEGRAM_BOT_TOKEN = "7497143761:AAGSvJH6xPAYdLSG3YbUadmzNFaYPKN8io8"
-OPENAI_API_KEY = "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"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+
+if not TELEGRAM_BOT_TOKEN:
+    print("❌ ERROR: TELEGRAM_BOT_TOKEN is missing! Add it in Render → Environment.")
+    exit(1)
+
+if not OPENAI_API_KEY:
+    print("❌ ERROR: OPENAI_API_KEY is missing! Add it in Render → Environment.")
+    exit(1)
 
 # === MEMORY ===
 user_memory = {}
@@ -104,7 +113,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         typing_msg = await update.message.reply_text("100%")
 
         for sentence in sentences:
-            # Highlight numbers, names, countries, examples using HTML
+            # Highlight names + numbers
             sentence = re.sub(r"(?<!\w)([A-Z][a-z]+(?: [A-Z][a-z]+)*)", r"<b>\1</b>", sentence)
             sentence = re.sub(r"(#\d+|\d+)", r"<code>\1</code>", sentence)
 
@@ -122,7 +131,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await asyncio.sleep(0.5 if sentence[-1] not in ".!?," else 0.8)
 
-        # === Follow-up Suggestions as Clickable Buttons with Links Below ===
+        # === Follow-up Suggestions ===
         suggestion_prompt = (
             "Based on the previous answer, create 2 follow-up questions the user might ask next. "
             "Format each suggestion starting with ➥, put the question in monospace using backticks like `example?` "
@@ -146,7 +155,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 for line in suggestions_text.splitlines():
                     if line.startswith("➥"):
-                        # Extract link if present
                         match = re.search(r"(https?://\S+)", line)
                         link = match.group(1) if match else None
                         question_text_only = re.sub(r"\s*\[source: https?://\S+\]", "", line.replace("➥", "").strip())
@@ -156,11 +164,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                         questions.append(question_text_only)
 
-                # Limit to 2 suggestions
                 questions = questions[:2]
                 links_list = links_list[:2]
 
-                # Build buttons
+                # buttons
                 keyboard = []
                 for q in questions:
                     button_id = str(uuid.uuid4())[:8]
@@ -169,26 +176,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
-                # Send message with buttons
                 await update.message.reply_text(
                     "Here are more questions you could ask:",
                     reply_markup=reply_markup
                 )
 
-                # Send links separately below buttons
+                # links below buttons
                 if links_list:
                     links_text = ""
                     for link in links_list:
                         links_text += f'<a href="{link}">source</a>\n'
                     await update.message.reply_text(links_text.strip(), parse_mode="HTML")
 
-        # Final completion indicator
         await update.message.reply_text("◌")
 
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error: {str(e)}")
 
-# === BUTTON HANDLER FIXED ===
+# === BUTTON HANDLER ===
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -213,6 +218,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === MAIN ===
 def main():
+    print("🚀 Starting bot...")
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -221,7 +227,6 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    print("🤖 AI bot running with HTML answer formatting, 2 suggestion buttons, links below buttons, smooth typing, and multi-message handling...")
     app.run_polling()
 
 if __name__ == "__main__":
